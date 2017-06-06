@@ -1,3 +1,4 @@
+from __future__ import print_function, division
 import os
 import pyglet
 from time import time, sleep, gmtime, strftime
@@ -71,21 +72,23 @@ class MainScreen(pyglet.window.Window):
             background_color = (0, .5, .8, 1)):
         super(MainScreen, self).__init__(width, height, fullscreen = False)
 
-        self.img_iter = img_iter()
+        self.img_iter = img_iter(indir)
 
         if os.path.isfile(logfile):
             with open(logfile) as self.logfile:
+                line = ''
                 for line in self.logfile:
                     print(line, end='')
                     pass
                 line = line.split("\t")
-                assert len(line)>2, "last line:\n%s" % str(line)
-                lastfile = line[1]
-
-            for ff in self.img_iter:
-                if ff==lastfile:
-                    break
-            self.logfile = open(logfile, "a")
+                if len(line)>2:
+                    lastfile = line[1]
+                    for ff in self.img_iter:
+                        if ff==lastfile:
+                            break
+                    self.logfile = open(logfile, "a")
+                else:
+                    self.logfile = open(logfile, "w")
         else:
             self.logfile = open(logfile, "w")
 
@@ -100,6 +103,18 @@ class MainScreen(pyglet.window.Window):
         # sets the background color
         gl.glClearColor(*background_color)
 
+        ######################3
+        self.label = HTMLLabel(
+                   '''<font face="Times New Roman" size="400" color="blue">
+                   {}</font>'''.format("Press any key to start"),
+                   x=self.width//2, y=self.height//2,
+                   height = self.height//8,
+                   width = self.width//8,
+                   anchor_x='center', anchor_y='center')
+        self.label.font_size = 30
+        self.label.draw()
+
+
     def __del__(self):
         self.logfile.close()
 
@@ -112,7 +127,7 @@ class MainScreen(pyglet.window.Window):
     def theend(self):
         print('The end')
         self.label = HTMLLabel(
-                   '''<font face="Times New Roman" size="42" color="red">
+                   '''<font face="Times New Roman" size="42" color="blue">
                     END</font>''',
                    x=self.width//2, y=self.height//2,
                    anchor_x='center', anchor_y='center')
@@ -133,7 +148,7 @@ class MainScreen(pyglet.window.Window):
                 self.prevpath = self.prevprevpath
         else:
             self.label = HTMLLabel(
-                       '''<font face="Times New Roman" size="400" color="blue">
+                       '''<font face="Times New Roman" size="400" color="red">
                        {}</font>'''.format(chr(symbol).upper() ),
                        x=self.width//2, y=self.height//2,
                        height = self.height//8,
@@ -148,15 +163,6 @@ class MainScreen(pyglet.window.Window):
             self.label = None
         if symbol == key.ESCAPE: # [ESC]
             self.alive = 0
-        elif symbol == key.R:
-            print('Rendering hello')
-            self.label = HTMLLabel(
-                       '''<font face="Times New Roman" size="42" color="red">
-                       Hello, <i>world</i></font>''',
-                       x=self.width//2, y=self.height//2,
-                       anchor_x='center', anchor_y='center')
-            self.label.font_size = 120
-            self.label.draw()
         elif symbol == key.BACKSPACE:
             #self.prevpath = self.prevprevpath
             #imgpath = self.prevpath
@@ -203,7 +209,13 @@ class MainScreen(pyglet.window.Window):
             #
             event = self.dispatch_events()
 
-x = MainScreen()
-x.run()
+
+if __name__=='__main__':
+
+    indir="img"
+    logfile="manual-labels.txt"
+
+    x = MainScreen(indir=indir, logfile=logfile)
+    x.run()
 
 
