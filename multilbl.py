@@ -1,5 +1,7 @@
 from __future__ import print_function, division
 import os
+from itertools import cycle
+import numpy as np
 import pyglet
 from time import time, sleep, gmtime, strftime
 from pyglet.text import Label, HTMLLabel
@@ -49,14 +51,25 @@ class LabelPgl(Label):
         self.draw()
 
 
-class LocalImageSprite(pyglet.sprite.Sprite):
-    def __init__(self, texture_file, x=0, y=0, local=True):
+def symbol_cycle(inp, symbols = ["", "S", "M", "X"]):
+    symcycle = cycle(symbols)
+    for ii,ss in enumerate(symcycle):
+        if inp.upper() == ss:
+            outp = next(symcycle)
+            break
+        if ii==len(symbols):
+            outp = symbols[0]
+            break
+    return outp
+
+class CustomSprite(pyglet.sprite.Sprite):
+    def __init__(self, texture_file, x=0, y=0, batch=None):
         ## Must load the texture as a image resource before initializing class:Sprite()
         self.texture = pyglet.image.load(texture_file)
 
-        super(LocalImageSprite, self).__init__(self.texture)
-        self.x = x
-        self.y = y
+        super(CustomSprite, self).__init__(self.texture, x=x,y=y, batch=batch)
+        #self.x = x
+        #self.y = y
 
     def _draw(self):
         self.draw()
@@ -70,6 +83,8 @@ class MainScreen(pyglet.window.Window):
             background_color = (0, .5, .8, 1)):
         super(MainScreen, self).__init__(width, height, fullscreen = False)
 
+        self.IMAGE_ROWS = 2
+        self.N_IMAGES = 4
         if type(indir) is list:
             "in the case of list input"
             self.img_iter = rev_iter(iter(indir))
@@ -97,12 +112,10 @@ class MainScreen(pyglet.window.Window):
         else:
             self.logfile = open(logfile, "w")
 
-        self.prevpath = ''
-        #self.img_list = list(img_iter())
 
         self.x, self.y = 0, 0
 
-        #self.bg = LocalImageSprite(figbg)
+        #self.bg = CustomSprite(figbg)
         self.sprites = []
         self.alive = 1
         # sets the background color
@@ -111,7 +124,7 @@ class MainScreen(pyglet.window.Window):
         ######################3
         self.label = HTMLLabel(
                    '''<font face="Times New Roman" size="400" color="blue">
-                   {}</font>'''.format("Press any key to start"),
+                   {}</font>'''.format("Press space or return to start"),
                    x=self.width//2, y=self.height//2,
                    height = self.height//8,
                    width = self.width//8,
@@ -124,6 +137,8 @@ class MainScreen(pyglet.window.Window):
         self.logfile.close()
 
     def on_draw(self):
+        if hasattr(self, 'batch'):
+             self.batch.draw()
         self.render()
 
     def on_close(self):
@@ -139,6 +154,34 @@ class MainScreen(pyglet.window.Window):
         self.label.font_size = 120
         self.label.draw()
 
+    def on_mouse_press(self, x, y, button, modifiers):
+        SYMBOLS = ["", "S", "M", "X"]
+        for nn, sub_sprite in enumerate(self.sprites):
+            if (x > sub_sprite.x and
+                x < (sub_sprite.x + sub_sprite.width) and
+                y > sub_sprite.y and
+                y < (sub_sprite.y + sub_sprite.height)
+                ):
+                print("click on: %d\tbutton: %d" % (nn, button))
+                if button == pyglet.window.mouse.LEFT:
+                    symbol = symbol_cycle(self.symbols[nn], symbols=SYMBOLS)
+                elif button == pyglet.window.mouse.RIGHT:
+                    symbol = symbol_cycle(self.symbols[nn], symbols=SYMBOLS[::-1])
+                self.symbols[nn] = symbol
+                 
+                label = HTMLLabel(
+                       '''<font face="Times New Roman" size="400" color="red">
+                       {}</font>'''.format((symbol).upper() ),
+                       x = sub_sprite.x + sub_sprite.width//2,
+                       y = sub_sprite.y + sub_sprite.height,
+                       height = sub_sprite.height//8,
+                       width = sub_sprite.width//8,
+                       anchor_x='center', anchor_y='center')
+                label.font_size = 200
+                label.draw()
+                self.labels[nn] = label
+
+
     def on_key_press(self, symbol, modifiers):
         if hasattr(self, "label"):
             #self.label.delete()
@@ -146,11 +189,7 @@ class MainScreen(pyglet.window.Window):
         #print(time(), self.prevpath, symbol, chr(symbol), sep="\t")
 
         if symbol == key.BACKSPACE:
-            if hasattr(self, "prevpath"):
-                #print('appending two files:\n%s\n%s' % (self.prevpath,self.prevprevpath))
-                self.img_iter.append(self.prevpath)
-                self.img_iter.append(self.prevprevpath)
-                self.prevpath = self.prevprevpath
+            self.labels = [None]
         else:
             self.label = HTMLLabel(
                        '''<font face="Times New Roman" size="400" color="red">
@@ -172,14 +211,18 @@ class MainScreen(pyglet.window.Window):
             #self.prevpath = self.prevprevpath
             #imgpath = self.prevpath
             self.imgpath = next(self.img_iter)
-            self.sprite = LocalImageSprite(self.imgpath, x=10, y=10)
-        else:
+            self.sprite = CustomSprite(self.imgpath, x=10, y=10)
+        elif symbol in [key.ENTER, key.RETURN, key.SPACE]:
             time_ = strftime("%Y/%m/%d %H:%M:%S", gmtime())
-            if self.prevpath:
-                print(time_, self.prevpath, symbol, chr(symbol), sep="\t")
-                print(time_, self.prevpath, symbol, chr(symbol), sep="\t", file=self.logfile)
+            if hasattr(self, "imgpaths"):
+                for nn, pp in enumerate(self.imgpaths):
+                    symbol = self.symbols[nn]
+                    print(time_, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t")
+                    print(time_, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t", file=self.logfile)
             try:
-                self.imgpath = next(self.img_iter)
+                self.imgpaths = []
+                for nn in range(self.N_IMAGES):
+                    self.imgpaths.append(next(self.img_iter))
             except StopIteration:
                 self.label = None
                 self.theend()
@@ -187,20 +230,41 @@ class MainScreen(pyglet.window.Window):
                 sleep(1)
                 self.alive = 0
                 return
-            self.sprite = LocalImageSprite(self.imgpath, x=10, y=10)
-            self.prevprevpath = self.prevpath
-            self.prevpath = self.imgpath
+            self.batch = pyglet.graphics.Batch()
+            self.sprites = []
+            self.labels = []
+            self.symbols = []
+            XSTEP = 300
+            for ii, pp in enumerate(self.imgpaths):
+                print('displaying', ii, pp)
+                x = (ii//self.IMAGE_ROWS) * XSTEP 
+                y = (ii % self.IMAGE_ROWS) * XSTEP
+                self.sprites.append(
+                        CustomSprite(pp, x, y, batch=self.batch)
+                                   )
+            self.symbols = np.asarray(['']*(ii+1))
+            self.labels = np.asarray([None]*(ii+1))
+        else:
+            print(str(symbol))
+            # self.sprite = CustomSprite(self.imgpath, x=10, y=10)
+            # self.prevprevpath = self.prevpath
+            #self.prevpath = self.imgpath
 
   
     def render(self):
         self.clear()
         #self.bg.draw()
-        if hasattr(self, "sprite"):
-            self.sprite.draw()
+        if hasattr(self, "sprites"):
+            for ss in self.sprites:
+                ss.draw()
 
         if hasattr(self, "label") and self.label is not None:
             # Draw text
             self.label.draw()
+        if hasattr(self, "labels") and self.labels is not None:
+            for label in self.labels:
+                if label:
+                    label.draw()
 
         self.flip()
 
@@ -221,5 +285,3 @@ if __name__=='__main__':
 
     x = MainScreen(indir=descr["indir"], logfile=descr["logfile"])
     x.run()
-
-
