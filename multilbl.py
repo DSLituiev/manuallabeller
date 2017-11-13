@@ -1,5 +1,9 @@
 from __future__ import print_function, division
+import io
 import os
+import sys
+import yaml
+import urllib.request
 from itertools import cycle
 import numpy as np
 import pyglet
@@ -29,19 +33,40 @@ class rev_iter():
     def append(self, item):
         self.buffer_.append(item)
 
+    def extend(self, items):
+        assert type(items) in (list, tuple), "extend takes lists or tuples"
+        self.buffer_.extend(items)
+
+def filenames_from_file(filepath, indir=""):
+    with open(filepath) as fh:
+        for line in fh:
+            line = line.split("\t")[0].split(",")[0]
+            line = line.lstrip().rstrip()
+            line = os.path.join(indir, line)
+            if os.path.isfile(line):
+                yield line
+            else:
+                print("not a file:\t%s" % line, file=sys.stderr)
+
+
 class path_iter(rev_iter):
-    def __init__(self, indir):
+    def __init__(self, indir, filelist=None):
         self.buffer_ = []
         self.indir = indir
-        files = os.listdir(indir)
-        self.otheriter = filter(lambda x : ~os.path.isdir(x), files)
+        if os.path.isdir(indir):
+            if os.path.isfile(filelist):
+                self.otheriter = filenames_from_file(indir=indir, filepath=filelist)
+            else:
+                files = os.listdir(indir)
+                self.otheriter = filter(lambda x : ~os.path.isdir(x), files)
+
     def modify_out(self, ff):
         return os.path.join(self.indir, ff)
 
 
 class LabelPgl(Label):
     def __init__(self, text, x=0, y=0, font_name = 'Times New Roman',
-                 font_size=36):
+                 font_size=30):
         super(LabelPgl, self).__init__('Hello, world',
                   font_name=font_name,
                   font_size=font_size,
@@ -51,7 +76,7 @@ class LabelPgl(Label):
         self.draw()
 
 
-def symbol_cycle(inp, symbols = ["", "S", "M", "X"]):
+def symbol_cycle(inp, symbols = ["", "M", "T", "X", "W"]):
     symcycle = cycle(symbols)
     for ii,ss in enumerate(symcycle):
         if inp.upper() == ss:
@@ -62,10 +87,22 @@ def symbol_cycle(inp, symbols = ["", "S", "M", "X"]):
             break
     return outp
 
+
+def get_pyglet_img_from_url(img_url, outf = 'noname.jpg'):
+    web_response = urllib.request.urlopen(img_url)
+    img_data = web_response.read()
+    dummy_file = io.BytesIO(img_data)
+    pygimg = pyglet.image.load(outf, file=dummy_file)
+    return pygimg
+
+
 class CustomSprite(pyglet.sprite.Sprite):
-    def __init__(self, texture_file, x=0, y=0, batch=None):
+    def __init__(self, texture_file, x=0, y=0, batch=None, ):
         ## Must load the texture as a image resource before initializing class:Sprite()
-        self.texture = pyglet.image.load(texture_file)
+        if texture_file.startswith("http"):
+            self.texture = get_pyglet_img_from_url(texture_file)
+        else:
+            self.texture = pyglet.image.load(texture_file)
 
         super(CustomSprite, self).__init__(self.texture, x=x,y=y, batch=batch)
         #self.x = x
@@ -77,6 +114,7 @@ class CustomSprite(pyglet.sprite.Sprite):
 class MainScreen(pyglet.window.Window):
     def __init__ (self,
             indir="img",
+            filelist=None,
             logfile="labels.txt",
             width=800,
             height=600,
@@ -85,26 +123,34 @@ class MainScreen(pyglet.window.Window):
 
         self.IMAGE_ROWS = 2
         self.N_IMAGES = 4
+        self.img_count = 0
+        self.imgpaths = []
+        self.prev_imgpaths = []
+
         if type(indir) is list:
             "in the case of list input"
             self.img_iter = rev_iter(iter(indir))
         elif type(indir) is iter:
             self.img_iter = rev_iter(indir)
-        elif os.path.isdir(indir):
-            self.img_iter = path_iter(indir)
-
+        elif os.path.isdir(indir): 
+            self.img_iter = path_iter(indir, filelist=filelist)
+        else:
+            raise ValueErroe("Unknown type of `indir`")
 
         if os.path.isfile(logfile):
             with open(logfile) as self.logfile:
                 line = ''
-                for line in self.logfile:
-                    print(line, end='')
+                for nn, line in enumerate(self.logfile):
+                    #print(line, end='')
                     pass
                 line = line.split("\t")
                 if len(line)>2:
                     lastfile = line[1]
                     for ff in self.img_iter:
                         if ff==lastfile:
+                            print("%d records found" % (nn+1))
+                            print("last line in previous session:\n%s" % line)
+                            print("=" * 20)
                             break
                     self.logfile = open(logfile, "a")
                 else:
@@ -134,6 +180,7 @@ class MainScreen(pyglet.window.Window):
 
 
     def __del__(self):
+        self.logfile.flush()
         self.logfile.close()
 
     def on_draw(self):
@@ -155,7 +202,7 @@ class MainScreen(pyglet.window.Window):
         self.label.draw()
 
     def on_mouse_press(self, x, y, button, modifiers):
-        SYMBOLS = ["", "S", "M", "X"]
+        SYMBOLS = ["E", "T", "X", "W", "",]
         for nn, sub_sprite in enumerate(self.sprites):
             if (x > sub_sprite.x and
                 x < (sub_sprite.x + sub_sprite.width) and
@@ -177,7 +224,7 @@ class MainScreen(pyglet.window.Window):
                        height = sub_sprite.height//8,
                        width = sub_sprite.width//8,
                        anchor_x='center', anchor_y='center')
-                label.font_size = 200
+                label.font_size = 100
                 label.draw()
                 self.labels[nn] = label
 
@@ -189,6 +236,10 @@ class MainScreen(pyglet.window.Window):
         #print(time(), self.prevpath, symbol, chr(symbol), sep="\t")
 
         if symbol == key.BACKSPACE:
+            if hasattr(self, "prev_imgpaths") and len(self.prev_imgpaths)>0:
+                self.img_count -= 2*self.N_IMAGES
+                #print('appending two files:\n%s\n%s' % (self.prevpath,self.prevprevpath))
+                self.img_iter.extend(self.prev_imgpaths[::-1])
             self.labels = [None]
         else:
             self.label = HTMLLabel(
@@ -201,29 +252,51 @@ class MainScreen(pyglet.window.Window):
             self.label.font_size = 200
             self.label.draw()
 
+    def _output_labels_(self, time=""):
+        if hasattr(self, "imgpaths"):
+            print("saving to", self.logfile)
+            for nn, pp in enumerate(self.imgpaths):
+                symbol = self.symbols[nn]
+                print(time, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t")
+                print(time, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t", file=self.logfile)
+
+
     def on_key_release(self, symbol, modifiers):
         if hasattr(self, "label"):
             #self.label.delete()
             self.label = None
         if symbol == key.ESCAPE: # [ESC]
             self.alive = 0
-        elif symbol == key.BACKSPACE:
+        #elif symbol == key.BACKSPACE:
+        #    pass
             #self.prevpath = self.prevprevpath
             #imgpath = self.prevpath
-            self.imgpath = next(self.img_iter)
-            self.sprite = CustomSprite(self.imgpath, x=10, y=10)
-        elif symbol in [key.ENTER, key.RETURN, key.SPACE]:
+            # self.imgpath = next(self.img_iter)
+            # self.sprite = CustomSprite(self.imgpath, x=10, y=10)
+        elif symbol in [key.ENTER, key.RETURN, key.SPACE, key.BACKSPACE]:
+            XLOC = YLOC = 300
+            XDIM = YDIM = 40
             time_ = strftime("%Y/%m/%d %H:%M:%S", gmtime())
-            if hasattr(self, "imgpaths"):
-                for nn, pp in enumerate(self.imgpaths):
-                    symbol = self.symbols[nn]
-                    print(time_, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t")
-                    print(time_, pp, ord(symbol) if len(symbol) is 1 else "", symbol, sep="\t", file=self.logfile)
+            self.label = HTMLLabel(
+                       '''<font face="Times New Roman" size="400" color="red">
+                       {}</font>'''.format(self.img_count),
+                       x = 2.125 *XLOC,
+                       y = YLOC,
+                       height = XDIM,
+                       width = YDIM,
+                       anchor_x='center', anchor_y='center')
+            self.label.font_size = 40
+            self.label.draw()
+            self._output_labels_(time=time_)
             try:
+                self.prev_imgpaths = self.imgpaths
                 self.imgpaths = []
                 for nn in range(self.N_IMAGES):
+                    self.img_count += 1
                     self.imgpaths.append(next(self.img_iter))
             except StopIteration:
+                print("saving the rest of files") 
+                self._output_labels_(time=time_)
                 self.label = None
                 self.theend()
                 self.flip()
@@ -236,7 +309,7 @@ class MainScreen(pyglet.window.Window):
             self.symbols = []
             XSTEP = 300
             for ii, pp in enumerate(self.imgpaths):
-                print('displaying', ii, pp)
+                print('displaying', self.img_count + ii, pp)
                 x = (ii//self.IMAGE_ROWS) * XSTEP 
                 y = (ii % self.IMAGE_ROWS) * XSTEP
                 self.sprites.append(
@@ -246,10 +319,6 @@ class MainScreen(pyglet.window.Window):
             self.labels = np.asarray([None]*(ii+1))
         else:
             print(str(symbol))
-            # self.sprite = CustomSprite(self.imgpath, x=10, y=10)
-            # self.prevprevpath = self.prevpath
-            #self.prevpath = self.imgpath
-
   
     def render(self):
         self.clear()
@@ -283,5 +352,32 @@ if __name__=='__main__':
     with open("datadescr.yaml", 'r') as stream:
         descr = yaml.load(stream)
 
-    x = MainScreen(indir=descr["indir"], logfile=descr["logfile"])
+    if 'url' in descr:
+        url = descr['url']
+        indir = 'data'
+        if 'meta' not in descr:
+            ls_url = 'http://{}/ls'.format(url)
+            filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
+            filelist = ['http://{}/{}/{}'.format(url, indir, x) for x in filelist 
+                if x.endswith("jpeg") or
+                x.endswith("png")]
+            
+            print(filelist)
+        else:
+            ls_url = 'http://{}/{}'.format(descr['url'], descr["meta"])
+            filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
+            filelist = ['http://{}/{}/{}'.format(url, indir, x) for x in filelist
+                if x.endswith("jpeg") or
+                x.endswith("png")]
+
+            print(filelist)
+
+    for kk in sorted(descr.keys()):
+        print("{}\t{}".format(kk,descr[kk]))
+
+    if 'url' in descr:
+        x = MainScreen(indir=filelist, logfile=descr["logfile"],)
+    else:
+        x = MainScreen(indir=descr["indir"], logfile=descr["logfile"], 
+            filelist=descr["meta"])
     x.run()
