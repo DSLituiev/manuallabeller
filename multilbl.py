@@ -1,9 +1,12 @@
+#!/usr/bin/env python3
+
 from __future__ import print_function, division
 import io
 import os
 import sys
 import yaml
 import urllib.request
+from http.client import RemoteDisconnected
 from itertools import cycle
 import numpy as np
 import pyglet
@@ -17,25 +20,37 @@ key = pyglet.window.key
 #figbg = "test.jpg"
 
 class rev_iter():
-    def __init__(self, otheriter):
+    def __init__(self, otheriter, processing=None):
         self.otheriter = otheriter
         self.buffer_ = []
+        if processing is None:
+            self.processing = lambda x: x
+        else:
+            self.processing = processing 
+
     def __iter__(self):
         return self
 
-    def modify_out(self, x):
-        return x
     def __next__(self):
         if len(self.buffer_)>0:
             return self.buffer_.pop()
         else:
-            return self.modify_out(next(self.otheriter))
+            return self.processing(next(self.otheriter))
+
     def append(self, item):
         self.buffer_.append(item)
 
     def extend(self, items):
         assert type(items) in (list, tuple), "extend takes lists or tuples"
         self.buffer_.extend(items)
+
+    def cache(self, num):
+        for ii in range(num):
+            try:
+                self.buffer_.append(self.__next__())
+            except StopIteration:
+                pass
+
 
 def filenames_from_file(filepath, indir=""):
     with open(filepath) as fh:
@@ -60,7 +75,7 @@ class path_iter(rev_iter):
                 files = os.listdir(indir)
                 self.otheriter = filter(lambda x : ~os.path.isdir(x), files)
 
-    def modify_out(self, ff):
+    def processing(self, ff):
         return os.path.join(self.indir, ff)
 
 
@@ -88,18 +103,34 @@ def symbol_cycle(inp, symbols = ["", "M", "T", "X", "W"]):
     return outp
 
 
+class NamedImage(pyglet.image.ImageData):
+    def __init__(self, filename, *args, file=None, name=None, **kwargs):
+        if name is None:
+            self.filename = filename
+        else:
+            self.filename=name
+        img  = pyglet.image.load(filename, *args, file=file, **kwargs)
+
+        super(NamedImage, self).__init__(img.width, img.height, img.format, img._get_data(), img.pitch)
+        #super(NamedImage, self).__init__(filename, *args, **kwargs)
+    def __repr__(self):
+        return self.filename
+
 def get_pyglet_img_from_url(img_url, outf = 'noname.jpg'):
     web_response = urllib.request.urlopen(img_url)
     img_data = web_response.read()
     dummy_file = io.BytesIO(img_data)
-    pygimg = pyglet.image.load(outf, file=dummy_file)
+    pygimg = NamedImage(outf, file=dummy_file,
+                        name=img_url.split('/')[-1])
     return pygimg
 
 
 class CustomSprite(pyglet.sprite.Sprite):
     def __init__(self, texture_file, x=0, y=0, batch=None, ):
         ## Must load the texture as a image resource before initializing class:Sprite()
-        if texture_file.startswith("http"):
+        if isinstance(texture_file, pyglet.image.ImageData):
+            self.texture = texture_file
+        elif texture_file.startswith("http"):
             self.texture = get_pyglet_img_from_url(texture_file)
         else:
             self.texture = pyglet.image.load(texture_file)
@@ -115,12 +146,22 @@ class MainScreen(pyglet.window.Window):
     def __init__ (self,
             indir="img",
             filelist=None,
+            cache=False,
             logfile="labels.txt",
             width=800,
             height=600,
-            background_color = (0, .5, .8, 1)):
-        super(MainScreen, self).__init__(width, height, fullscreen = False)
+            background_color = (0, .5, .8, 1),
+            symbols=["E", "T", "X", "W", "",]):
+        """
 
+        symbols: last is the default
+        """
+        super(MainScreen, self).__init__(width, height, fullscreen = False, vsync=False)
+        pyglet.clock.schedule_interval(self.update, 1.0/128.0)
+        pyglet.clock.set_fps_limit(128)
+
+
+        self.symbol_list = symbols 
         self.IMAGE_ROWS = 2
         self.N_IMAGES = 4
         self.img_count = 0
@@ -146,6 +187,7 @@ class MainScreen(pyglet.window.Window):
                 line = line.split("\t")
                 if len(line)>2:
                     lastfile = line[1]
+                    # !!!
                     for ff in self.img_iter:
                         if ff==lastfile:
                             print("%d records found" % (nn+1))
@@ -158,6 +200,8 @@ class MainScreen(pyglet.window.Window):
         else:
             self.logfile = open(logfile, "w")
 
+        if cache:
+            self.cache = True
 
         self.x, self.y = 0, 0
 
@@ -188,6 +232,13 @@ class MainScreen(pyglet.window.Window):
              self.batch.draw()
         self.render()
 
+    def update(self):
+        if self.cache:
+            self.cache = None
+            print("caching...")
+            self.img_iter.processing = get_pyglet_img_from_url
+
+
     def on_close(self):
         self.alive = 0
 
@@ -202,7 +253,6 @@ class MainScreen(pyglet.window.Window):
         self.label.draw()
 
     def on_mouse_press(self, x, y, button, modifiers):
-        SYMBOLS = ["E", "T", "X", "W", "",]
         for nn, sub_sprite in enumerate(self.sprites):
             if (x > sub_sprite.x and
                 x < (sub_sprite.x + sub_sprite.width) and
@@ -211,9 +261,9 @@ class MainScreen(pyglet.window.Window):
                 ):
                 print("click on: %d\tbutton: %d" % (nn, button))
                 if button == pyglet.window.mouse.LEFT:
-                    symbol = symbol_cycle(self.symbols[nn], symbols=SYMBOLS)
+                    symbol = symbol_cycle(self.symbols[nn], symbols=self.symbol_list)
                 elif button == pyglet.window.mouse.RIGHT:
-                    symbol = symbol_cycle(self.symbols[nn], symbols=SYMBOLS[::-1])
+                    symbol = symbol_cycle(self.symbols[nn], symbols=self.symbol_list[::-1])
                 self.symbols[nn] = symbol
                  
                 label = HTMLLabel(
@@ -319,6 +369,10 @@ class MainScreen(pyglet.window.Window):
             self.labels = np.asarray([None]*(ii+1))
         else:
             print(str(symbol))
+
+        if symbol is not key.BACKSPACE:
+            self.flip()
+            self.img_iter.cache(self.N_IMAGES)
   
     def render(self):
         self.clear()
@@ -347,11 +401,35 @@ class MainScreen(pyglet.window.Window):
             #
             event = self.dispatch_events()
 
+import subprocess
+import sys
+
+
+def sshconnect(host, inport=5000, outport=5000, cmd=None):
+    cmdlist =["ssh", "-L", "{}:localhost:{}".format(inport,outport),
+                host] 
+    if cmd is not None:
+        cmdlist.append(cmd)
+    print('>' + " ".join(cmdlist))
+    ssh = subprocess.Popen(cmdlist,
+                           shell=False,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+    result = ssh.stdout.readlines()
+    if result == []:
+        error = ssh.stderr.readlines()
+        print("ERROR: %s" % error, file=sys.stderr)
+    else:
+        print(result)
+    return
+
 
 if __name__=='__main__':
     with open("datadescr.yaml", 'r') as stream:
         descr = yaml.load(stream)
 
+    if 'host' in descr:
+        sshconnect(descr['host'], cmd=descr.get('cmd'))
     if 'url' in descr:
         url = descr['url']
         indir = 'data'
@@ -365,7 +443,14 @@ if __name__=='__main__':
             print(filelist)
         else:
             ls_url = 'http://{}/{}'.format(descr['url'], descr["meta"])
-            filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
+            try:
+                abort = False
+                filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
+            except RemoteDisconnected as ee:
+                abort = True
+            finally:
+                if abort:
+                    raise RemoteDisconnected("MAKE SURE THE SERVER IS RUNNING")
             filelist = ['http://{}/{}/{}'.format(url, indir, x) for x in filelist
                 if x.endswith("jpeg") or
                 x.endswith("png")]
@@ -376,8 +461,12 @@ if __name__=='__main__':
         print("{}\t{}".format(kk,descr[kk]))
 
     if 'url' in descr:
-        x = MainScreen(indir=filelist, logfile=descr["logfile"],)
-    else:
-        x = MainScreen(indir=descr["indir"], logfile=descr["logfile"], 
-            filelist=descr["meta"])
-    x.run()
+        descr["meta"] = None
+        descr["indir"] = filelist
+
+    app = MainScreen(indir=descr["indir"], logfile=descr["logfile"], 
+            filelist=descr["meta"],
+            cache=True,
+            symbols=descr.get("symbols", ["E", "T", "X", "W", "",])
+            )
+    app.run()
