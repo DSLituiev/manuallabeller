@@ -1,6 +1,7 @@
 
 ## Installation
-download repository:
+
+clone repository from your terminal:
 
     git clone https://github.com/DSLituiev/manuallabeller
 
@@ -18,7 +19,7 @@ From your local machine, log into the server with port forwarding:
 This way you got to the server side and port forwarding has been established. Now you need to launch the flask server
 that will serve images:
 
-    # go to the directory with the repository and data
+    # go to the repository directory
     # within this directory run:
     bash runserver.sh
 
@@ -27,7 +28,7 @@ Open another terminal window (client side / your computer). Go to this repo dire
 
     python3 multilbl.py
 
-The app will read images from the server, present them, and save labels you provide locally.
+The app window will appear. The app will read images from the server, present them, and save locally labels you provide.
 
 ## Configuration file
 configuration is stored in `config.yaml` with following fields:
@@ -41,4 +42,4 @@ configuration is stored in `config.yaml` with following fields:
      - T
      - X
      - W
-     - ''
+     - ''                          # last label is the default label
