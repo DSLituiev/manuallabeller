@@ -11,8 +11,13 @@ if you are going to use the app with a remote image server, have it on your serv
 
 From your local machine, log into the server with port forwarding:
 
+    # use a bash script that reads 'server' line from the `config.yaml` :
+    bash logintoserver.sh
+
+As an alternative, log in manually:
+
     # set server ip/dns address here
-    SERVER=
+    SERVER=        # our server address 
     ssh -L 5000:localhost:5000 $SERVER
 
     
