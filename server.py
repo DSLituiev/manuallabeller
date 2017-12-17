@@ -26,7 +26,7 @@ def send_ls():
 
 @app.route('/')
 def hello_world():
-    return 'Hello, World!'
+    return '\n\nthis is a server of images for manual classification'
 
 if __name__ == "__main__":
         app.run(host='0.0.0.0')
