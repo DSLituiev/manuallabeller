@@ -425,7 +425,7 @@ def sshconnect(host, inport=5000, outport=5000, cmd=None):
 
 
 if __name__=='__main__':
-    with open("datadescr.yaml", 'r') as stream:
+    with open("config.yaml", 'r') as stream:
         descr = yaml.load(stream)
 
     if 'host' in descr:
@@ -435,6 +435,7 @@ if __name__=='__main__':
         indir = 'data'
         if 'meta' not in descr:
             ls_url = 'http://{}/ls'.format(url)
+            print("reading file list:\t{}".format(ls_url))
             filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
             filelist = ['http://{}/{}/{}'.format(url, indir, x) for x in filelist 
                 if x.endswith("jpeg") or
@@ -443,6 +444,7 @@ if __name__=='__main__':
             print(filelist)
         else:
             ls_url = 'http://{}/{}'.format(descr['url'], descr["meta"])
+            print("reading file list:\t{}".format(ls_url))
             try:
                 abort = False
                 filelist = urllib.request.urlopen(ls_url).read().decode().split('\n')
@@ -455,7 +457,7 @@ if __name__=='__main__':
                 if x.endswith("jpeg") or
                 x.endswith("png")]
 
-            print(filelist)
+            print("READ A LIST OF {} FILES".format(len(filelist)))
 
     for kk in sorted(descr.keys()):
         print("{}\t{}".format(kk,descr[kk]))
