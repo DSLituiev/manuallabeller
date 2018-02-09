@@ -19,6 +19,13 @@ from pyglet.gl import *
 key = pyglet.window.key
 #figbg = "test.jpg"
 
+def url_exists(url):
+    try:
+        _ = urllib.request.urlopen(url)
+        return True
+    except urllib.error.HTTPError:
+        return False
+
 class rev_iter():
     def __init__(self, otheriter, processing=None):
         self.otheriter = otheriter
@@ -117,7 +124,10 @@ class NamedImage(pyglet.image.ImageData):
         return self.filename
 
 def get_pyglet_img_from_url(img_url, outf = 'noname.jpg'):
-    web_response = urllib.request.urlopen(img_url)
+    try:
+        web_response = urllib.request.urlopen(img_url)
+    except urllib.error.HTTPError:
+        raise FileNotFoundError("{} not found".format(img_url))
     img_data = web_response.read()
     dummy_file = io.BytesIO(img_data)
     pygimg = NamedImage(outf, file=dummy_file,
@@ -153,13 +163,11 @@ class MainScreen(pyglet.window.Window):
             background_color = (0, .5, .8, 1),
             symbols=["E", "T", "X", "W", "",]):
         """
-
         symbols: last is the default
         """
         super(MainScreen, self).__init__(width, height, fullscreen = False, vsync=False)
         pyglet.clock.schedule_interval(self.update, 1.0/128.0)
         pyglet.clock.set_fps_limit(128)
-
 
         self.symbol_list = symbols 
         self.IMAGE_ROWS = 2
@@ -181,11 +189,13 @@ class MainScreen(pyglet.window.Window):
         if os.path.isfile(logfile):
             with open(logfile) as self.logfile:
                 line = ''
+                nn = 0
                 for nn, line in enumerate(self.logfile):
                     #print(line, end='')
                     pass
+                self.img_count = nn
                 line = line.split("\t")
-                if len(line)>2:
+                if len(line)>2 or nn>1:
                     lastfile = line[1]
                     # !!!
                     for ff in self.img_iter:
@@ -285,7 +295,7 @@ class MainScreen(pyglet.window.Window):
             self.label = None
         #print(time(), self.prevpath, symbol, chr(symbol), sep="\t")
 
-        if symbol == key.BACKSPACE:
+        if symbol == key.BACKSPACE or symbol == key.LEFT:
             if hasattr(self, "prev_imgpaths") and len(self.prev_imgpaths)>0:
                 self.img_count -= 2*self.N_IMAGES
                 #print('appending two files:\n%s\n%s' % (self.prevpath,self.prevprevpath))
@@ -323,7 +333,7 @@ class MainScreen(pyglet.window.Window):
             #imgpath = self.prevpath
             # self.imgpath = next(self.img_iter)
             # self.sprite = CustomSprite(self.imgpath, x=10, y=10)
-        elif symbol in [key.ENTER, key.RETURN, key.SPACE, key.BACKSPACE]:
+        elif symbol in [key.ENTER, key.RETURN, key.SPACE, key.RIGHT, key.LEFT, key.BACKSPACE]:
             XLOC = YLOC = 300
             XDIM = YDIM = 40
             time_ = strftime("%Y/%m/%d %H:%M:%S", gmtime())
@@ -359,12 +369,16 @@ class MainScreen(pyglet.window.Window):
             self.symbols = []
             XSTEP = 300
             for ii, pp in enumerate(self.imgpaths):
-                print('displaying', self.img_count + ii, pp)
+                print('displaying', self.img_count + ii - self.N_IMAGES, pp)
                 x = (ii//self.IMAGE_ROWS) * XSTEP 
                 y = (ii % self.IMAGE_ROWS) * XSTEP
-                self.sprites.append(
-                        CustomSprite(pp, x, y, batch=self.batch)
-                                   )
+                try:
+                    self.sprites.append(
+                            CustomSprite(pp, x, y, batch=self.batch)
+                                       )
+                except FileNotFoundError as ee:
+                    print(ee, file=sys.stderr)
+                    self.imgpaths[ii] = ''
             self.symbols = np.asarray(['']*(ii+1))
             self.labels = np.asarray([None]*(ii+1))
         else:
@@ -457,7 +471,9 @@ if __name__=='__main__':
                 if x.endswith("jpeg") or
                 x.endswith("png")]
 
-            print("READ A LIST OF {} FILES".format(len(filelist)))
+            print("RECEIVED A LIST OF {} FILES".format(len(filelist)))
+            filelist= [ff for ff in filelist if url_exists(ff)]
+            print("READING A LIST OF {} FILES".format(len(filelist)))
 
     for kk in sorted(descr.keys()):
         print("{}\t{}".format(kk,descr[kk]))
